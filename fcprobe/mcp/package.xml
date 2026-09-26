@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no" ?>
+<package format="1" xmlns="https://wiki.freecad.org/Package_Metadata">
+  <name>FreeCAD-MCP</name>
+  <description>Exposes a live FreeCAD session over a Unix-socket JSON-RPC so the freecad_mcp_server (MCP) can drive it: sketches, pad/pocket, fasteners, selection, screenshots, logs, ...</description>
+  <version>0.1</version>
+  <date>2026-09-26</date>
+  <maintainer>FreeCAD dev</maintainer>
+  <license>LGPL-2.1-or-later</license>
+  <icon>Resources/freecad_mcp.svg</icon>
+
+  <content>
+    <workbench>
+      <classname>FreeCADMcpWorkbench</classname>
+      <subdirectory>./</subdirectory>
+      <tag>mcp</tag>
+      <tag>ai</tag>
+      <tag>automation</tag>
+    </workbench>
+  </content>
+
+</package>

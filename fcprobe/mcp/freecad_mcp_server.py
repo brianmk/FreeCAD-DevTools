@@ -9,18 +9,20 @@ shape, extrude/pad/pocket, thread holes, mirror features, read the selection
 and read/move the viewport cursor.
 
 Lifecycle / connection:
-    * The guest must be running inside a FreeCAD process
-      (``FreeCAD freecad_mcp_guest.py`` for the GUI, or
-      ``FreeCADCmd freecad_mcp_guest.py`` headless).
+    * The guest must be running inside a FreeCAD process.  In the GUI this is
+      provided by the FreeCAD-MCP *addon* (this directory): installing it makes
+      FreeCAD open the socket on startup.  Headless FreeCADCmd has no GUI addon
+      loader, so it is still started directly as
+      ``FreeCADCmd freecad_mcp_guest.py``.
     * The server connects on demand (one connection per tool call).  If no
-      guest is listening and ``--spawn`` is passed, the server launches the
-      FreeCAD GUI with the guest embedded and waits for its socket.
+      guest is listening and ``--spawn`` is passed, the server launches FreeCAD
+      and waits for its socket (the addon opens it; no script path is passed).
 
 Configuration (environment / CLI):
     FC_MCP_SOCKET   Unix socket path (default /tmp/opencode/freecad_mcp.sock)
     FREECAD_BIN     FreeCAD binary (default build/debug/bin/FreeCAD)
-    --spawn         launch FreeCAD on startup if no guest is running
-    --headless      spawn FreeCADCmd instead of the GUI
+    --spawn         launch FreeCAD if no guest is running (addon opens the socket)
+    --headless      spawn FreeCADCmd (guest run as a script) instead of the GUI
     --env K=V       extra env for a spawned FreeCAD (repeatable)
 """
 
@@ -78,8 +80,8 @@ class GuestClient:
     def call(self, method: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         if not os.path.exists(self.sock_path):
             raise FreeCADConnectionError(
-                f"no live FreeCAD guest at {self.sock_path} - start it with "
-                f"'FreeCAD {GUEST}' or run this server with --spawn")
+                f"no live FreeCAD guest at {self.sock_path} - enable the "
+                f"FreeCAD-MCP addon in FreeCAD (or run this server with --spawn)")
         conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         conn.settimeout(self.timeout)
         try:
@@ -152,7 +154,13 @@ def spawn_freecad(headless: bool = False,
                   env_overrides: Optional[Dict[str, str]] = None,
                   binary: Optional[str] = None,
                   wait: int = 30) -> bool:
-    """Launch FreeCAD (with the guest embedded) and wait for its socket."""
+    """Launch FreeCAD and wait for the guest socket.
+
+    GUI: the FreeCAD-MCP addon shipped beside this server opens the socket when
+    FreeCAD starts, so FreeCAD is launched plainly (no script argument).  This
+    is why the addon must be installed in FreeCAD's Mod directory.  Headless
+    FreeCADCmd does not load GUI addons, so it is pointed straight at the guest.
+    """
     global _spawned
     try:
         os.unlink(SOCKET_PATH)
@@ -165,7 +173,8 @@ def spawn_freecad(headless: bool = False,
         else:
             bincmd = shutil.which("FreeCAD") or bincmd
     env = _merge_env(env_overrides or {})
-    _spawned = subprocess.Popen([bincmd, GUEST], env=env,
+    launch = [bincmd, GUEST] if headless else [bincmd]
+    _spawned = subprocess.Popen(launch, env=env,
                                 stdout=subprocess.DEVNULL,
                                 stderr=subprocess.STDOUT)
     t0 = time.time()
@@ -870,9 +879,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     p = argparse.ArgumentParser(prog="freecad_mcp_server",
                                 description="MCP server for a live FreeCAD")
     p.add_argument("--spawn", action="store_true",
-                   help="launch FreeCAD with the guest on startup if none is running")
+                   help="launch FreeCAD if no guest is running (the FreeCAD-MCP "
+                        "addon opens the socket)")
     p.add_argument("--headless", action="store_true",
-                   help="with --spawn, use FreeCADCmd instead of the GUI")
+                   help="with --spawn, use FreeCADCmd and run the guest as a script")
     p.add_argument("--binary", default=None, help="FreeCAD binary to spawn")
     p.add_argument("--env", action="append", default=[], metavar="K=V",
                    help="extra env for a spawned FreeCAD (repeatable)")

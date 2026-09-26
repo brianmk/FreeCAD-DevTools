@@ -32,23 +32,46 @@ python3 -m venv /tmp/opencode/mcp-venv
 - The debug build needs the boost lib path on `LD_LIBRARY_PATH`
   (`/tmp/opencode/boost91` here) and `QT_STYLE_OVERRIDE=fusion` for the GUI.
 
-## Launching
+## Install as a FreeCAD addon (recommended)
+
+This directory *is* a FreeCAD addon: it ships `package.xml`, `Init.py` /
+`InitGui.py` and a **MCP** workbench.  Installing it makes FreeCAD open the
+guest socket on startup, so an MCP server can attach to a **normally-launched**
+FreeCAD — no script argument, no fragile path.
+
+Copy it into FreeCAD's user `Mod` directory (a *real* directory; FreeCAD 1.1+
+ignores symlinked addons), then restart FreeCAD:
+
+```bash
+cp -r "$FREECAD_DEVTOOLS/fcprobe/mcp" \
+      "$HOME/.local/share/FreeCAD/v26-3/Mod/FreeCAD-MCP"
+```
+
+The **MCP** workbench toolbar (or the *Toggle MCP Server* command) turns the
+socket on/off; the choice is persisted in *Preferences → MCP* and applied at
+startup (default: on).  *Copy MCP Socket Path* puts the socket path on the
+clipboard.  Default socket: `/tmp/opencode/freecad_mcp.sock`
+(override with `FC_MCP_SOCKET=/path`).
+
+## Launching the guest manually
 
 ### 1. Start the guest inside FreeCAD
 
-**Live GUI** (recommended — you watch the model being built; cursor, selection,
-screenshots all work):
+**GUI** (only needed if the addon is *not* installed; you watch the model being
+built — cursor, selection, screenshots all work):
 
 ```bash
 env LD_LIBRARY_PATH=/tmp/opencode/boost91 QT_STYLE_OVERRIDE=fusion \
-    QT_QPA_PLATFORM=wayland build/debug/bin/FreeCAD tools/fcprobe/mcp/freecad_mcp_guest.py
+    QT_QPA_PLATFORM=wayland build/debug/bin/FreeCAD \
+    "$FREECAD_DEVTOOLS/fcprobe/mcp/freecad_mcp_guest.py"
 ```
 
-**Headless** (no window; everything except cursor/view/screenshot/selection):
+**Headless** (FreeCADCmd has no GUI addon loader, so run the guest as a script;
+no cursor/view/screenshot/selection):
 
 ```bash
 env LD_LIBRARY_PATH=/tmp/opencode/boost91 QT_STYLE_OVERRIDE=fusion \
-    build/debug/bin/FreeCADCmd tools/fcprobe/mcp/freecad_mcp_guest.py
+    build/debug/bin/FreeCADCmd "$FREECAD_DEVTOOLS/fcprobe/mcp/freecad_mcp_guest.py"
 ```
 
 You should see `/tmp/opencode/freecad_mcp.sock` appear (override with
@@ -57,14 +80,15 @@ You should see `/tmp/opencode/freecad_mcp.sock` appear (override with
 ### 2. Start the MCP server
 
 ```bash
-/tmp/opencode/mcp-venv/bin/python tools/fcprobe/mcp/freecad_mcp_server.py
+/tmp/opencode/mcp-venv/bin/python "$FREECAD_DEVTOOLS/fcprobe/mcp/freecad_mcp_server.py"
 ```
 
 To have the server launch FreeCAD itself instead (and wait for the socket):
 
 ```bash
-/tmp/opencode/mcp-venv/bin/python tools/fcprobe/mcp/freecad_mcp_server.py --spawn
-# GUI FreeCAD; add --headless to launch FreeCADCmd, --env K=V to pass env through
+/tmp/opencode/mcp-venv/bin/python "$FREECAD_DEVTOOLS/fcprobe/mcp/freecad_mcp_server.py" --spawn
+# GUI FreeCAD; the addon opens the socket.  --headless launches FreeCADCmd with
+# the guest as a script (no addon loader there); --env K=V passes env through.
 ```
 
 ## MCP client configuration
@@ -76,7 +100,7 @@ To have the server launch FreeCAD itself instead (and wait for the socket):
   "mcp": {
     "freecad": {
       "command": "/tmp/opencode/mcp-venv/bin/python",
-      "args": ["/home/phantom/dev/FreeCAD/tools/fcprobe/mcp/freecad_mcp_server.py"],
+      "args": ["/home/phantom/dev/FreeCAD-DevTools/fcprobe/mcp/freecad_mcp_server.py"],
       "env": {
         "LD_LIBRARY_PATH": "/tmp/opencode/boost91",
         "QT_STYLE_OVERRIDE": "fusion",
@@ -95,7 +119,7 @@ on macOS, `~/.config/Claude/claude_desktop_config.json` on Linux):
   "mcpServers": {
     "freecad": {
       "command": "/tmp/opencode/mcp-venv/bin/python",
-      "args": ["/home/phantom/dev/FreeCAD/tools/fcprobe/mcp/freecad_mcp_server.py"],
+      "args": ["/home/phantom/dev/FreeCAD-DevTools/fcprobe/mcp/freecad_mcp_server.py"],
       "env": {
         "LD_LIBRARY_PATH": "/tmp/opencode/boost91",
         "QT_STYLE_OVERRIDE": "fusion",
@@ -106,8 +130,8 @@ on macOS, `~/.config/Claude/claude_desktop_config.json` on Linux):
 }
 ```
 
-The MCP server auto-starts the guest via `--spawn` if you prefer not to launch
-it by hand.
+With the addon installed, FreeCAD already serves the socket; otherwise the MCP
+server auto-starts FreeCAD via `--spawn` (the addon opens the socket on launch).
 
 ## Tools (76)
 
