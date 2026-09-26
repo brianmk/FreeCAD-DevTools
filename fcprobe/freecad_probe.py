@@ -755,6 +755,12 @@ _REPO_ROOT = os.path.abspath(os.environ["FREECAD_SRC"]) if os.environ.get(
     "FREECAD_SRC") else os.path.normpath(
         os.path.join(os.path.dirname(os.path.abspath(__file__)),
                      "..", "..", "FreeCAD"))
+# When neither FREECAD_SRC nor the sibling checkout exists (e.g. this repo
+# checked out standalone in CI), fall back to this repo's own root so the
+# harness still has a valid working directory and stays importable/testable.
+if not os.path.isdir(_REPO_ROOT):
+    _REPO_ROOT = os.path.normpath(
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
 
 # -- CPU-only (software rasterizer) profiles -------------------------------
@@ -1203,10 +1209,13 @@ def run_case(
 
     stdout_path = os.path.join(artifact_dir, "stdout.log")
     report.register(stdout_path)
+    run_cwd = os.environ.get("FC_PROBE_CWD") or _REPO_ROOT
+    if not os.path.isdir(run_cwd):
+        run_cwd = os.path.dirname(script) or os.getcwd()
     with open(stdout_path, "w", encoding="utf-8", errors="replace") as outf:
         proc = subprocess.Popen(
             launch_argv,
-            cwd=os.environ.get("FC_PROBE_CWD") or _REPO_ROOT,
+            cwd=run_cwd,
             env=env,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
