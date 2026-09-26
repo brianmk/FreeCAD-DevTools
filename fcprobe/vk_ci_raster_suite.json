@@ -1,0 +1,96 @@
+{
+  "description": "Device-agnostic Vulkan RASTER render gate. Runs on a software Vulkan device (lavapipe) in CI with the Vulkan viewport forced on (each probe sets UseVulkanRenderer=1 / VulkanRenderMode=1). Every case produces a draw-command fingerprint ([VKBE] drawlist_hash) that is compared against tools/fcprobe/golden/vk_ci_raster_hashes.json. FC_VULKAN_BACKEND_DEBUG=1 is set for every case because the [VKBE] draw-command stream (the thing fingerprinted) is only emitted with the backend debug log on. Ray-tracing cases live in vk_suite.json and require a real GPU; they are deliberately excluded here because lavapipe has no VK_KHR_acceleration_structure.",
+  "cases": [
+    {
+      "name": "diag",
+      "script": "vk_diag_probe.py",
+      "env": {
+        "FC_VULKAN_BACKEND_DEBUG": "1",
+        "FC_VULKAN_DEBUG_UTILS": "1",
+        "FC_VULKAN_GPU_TIMING": "1",
+        "FC_VULKAN_PIPELINE_FEEDBACK": "1"
+      },
+      "timeout": 300
+    },
+    {
+      "name": "modediag",
+      "script": "vk_modediag_probe.py",
+      "env": { "FC_VULKAN_BACKEND_DEBUG": "1" },
+      "timeout": 300
+    },
+    {
+      "name": "modelswitch",
+      "script": "vk_modelswitch_probe.py",
+      "env": { "FC_VULKAN_BACKEND_DEBUG": "1" },
+      "timeout": 300
+    },
+    {
+      "name": "scene",
+      "script": "vk_scene_probe.py",
+      "env": { "FC_VULKAN_BACKEND_DEBUG": "1" },
+      "timeout": 300
+    },
+    {
+      "name": "pick",
+      "script": "vk_pick_probe.py",
+      "env": { "FC_VULKAN_BACKEND_DEBUG": "1" },
+      "timeout": 300
+    },
+    {
+      "name": "pick-far",
+      "script": "vk_pick_far_probe.py",
+      "env": { "FC_VULKAN_BACKEND_DEBUG": "1" },
+      "timeout": 300
+    },
+    {
+      "name": "points",
+      "script": "vk_points_probe.py",
+      "env": {
+        "FC_VULKAN_BACKEND_DEBUG": "1",
+        "FC_VULKAN_BREADCRUMBS": "1",
+        "FC_VULKAN_DUMP_FRAME": "1",
+        "FC_VULKAN_DUMP_START": "0",
+        "FC_VULKAN_DUMP_END": "6"
+      },
+      "timeout": 300
+    },
+    {
+      "name": "prefs",
+      "script": "vk_prefs_probe.py",
+      "env": {
+        "FC_VULKAN_BACKEND_DEBUG": "1",
+        "FC_VULKAN_BREADCRUMBS": "1",
+        "FC_VULKAN_DUMP_FRAME": "1",
+        "FC_VULKAN_DUMP_START": "0",
+        "FC_VULKAN_DUMP_END": "6"
+      },
+      "timeout": 300
+    },
+    {
+      "name": "geomlod",
+      "script": "vk_geomlod_probe.py",
+      "env": {
+        "FC_VULKAN_BACKEND_DEBUG": "1",
+        "FC_VULKAN_GEOM_LOD_ALWAYS": "1"
+      },
+      "timeout": 300
+    },
+    {
+      "name": "interaction",
+      "script": "vk_interaction_probe.py",
+      "env": { "FC_VULKAN_BACKEND_DEBUG": "1" },
+      "timeout": 300
+    },
+    {
+      "name": "physical-material",
+      "script": "vk_physical_material_probe.py",
+      "env": {
+        "FC_VULKAN_BACKEND_DEBUG": "1",
+        "FC_VULKAN_DUMP_FRAME": "1",
+        "FC_VULKAN_DUMP_START": "0",
+        "FC_VULKAN_DUMP_END": "6"
+      },
+      "timeout": 300
+    }
+  ]
+}

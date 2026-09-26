@@ -1,0 +1,35 @@
+{
+  "description": "CPU-only suite: FreeCAD with no GPU at all. Three independent paths -- (1) headless FreeCADCmd with no GUI/GL/Vulkan context, (2) the fork's Vulkan viewport on a software Vulkan device (Mesa lavapipe, VK_PHYSICAL_DEVICE_TYPE_CPU) over xcb/XWayland, (3) native Wayland with software OpenGL (Mesa llvmpipe). The software drivers are discovered by the cpu-xcb / cpu-gl harness profiles from FC_CPU_ICD / FC_CPU_MESA_LIB or conventional locations; a case fails loudly if no software device came up (rather than silently using the GPU). Software Vulkan has no Wayland WSI in Mesa's lavapipe builds, so case (2) uses xcb; case (3) covers native Wayland via llvmpipe.",
+  "cases": [
+    {
+      "name": "cpu-cmd",
+      "script": "vk_cpu_cmd_probe.py",
+      "binary": "cmd",
+      "profile": "gl",
+      "timeout": 120
+    },
+    {
+      "name": "cpu-vulkan",
+      "script": "vk_cpu_vulkan_probe.py",
+      "profile": "cpu-xcb",
+      "env": {
+        "FC_VULKAN_BREADCRUMBS": "1",
+        "FC_VULKAN_DUMP_FRAME": "1",
+        "FC_VULKAN_DUMP_START": "0",
+        "FC_VULKAN_DUMP_END": "400"
+      },
+      "timeout": 300
+    },
+    {
+      "name": "cpu-wayland-gl",
+      "script": "vk_cpu_gl_probe.py",
+      "profile": "cpu-gl",
+      "env": {
+        "FC_CPU_PNG": "/tmp/opencode/cpu_gl_probe.png",
+        "LIBGL_ALWAYS_SOFTWARE": "1",
+        "MESA_LOADER_DRIVER_OVERRIDE": "llvmpipe"
+      },
+      "timeout": 300
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no" ?>
+<package format="1" xmlns="https://wiki.freecad.org/Package_Metadata">
+  <name>DevTools</name>
+  <description>FreeCAD dev/test tooling: the fcprobe in-GUI harness and the live FreeCAD MCP server.</description>
+  <version>0.1</version>
+  <date>2026-09-26</date>
+  <maintainer>phantomcake</maintainer>
+  <license file="LICENSE">LGPL-2.1-or-later</license>
+  <icon>Resources/devtools.svg</icon>
+
+  <content>
+    <workbench>
+      <classname>DevToolsWorkbench</classname>
+      <subdirectory>./</subdirectory>
+      <tag>testing</tag>
+      <tag>developer</tag>
+    </workbench>
+  </content>
+
+</package>

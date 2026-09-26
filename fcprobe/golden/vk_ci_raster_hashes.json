@@ -1,0 +1,4 @@
+{
+  "_comment": "Golden draw-command fingerprints (drawlist_hash) for tools/fcprobe/vk_ci_raster_suite.json. Bootstrapped from the first software-Vulkan (lavapipe) CI run: cases absent here are reported NEW and, when the workflow uploads the refreshed manifest, are committed to lock the baseline. A present case must reproduce its hash exactly.",
+  "cases": {}
+}
