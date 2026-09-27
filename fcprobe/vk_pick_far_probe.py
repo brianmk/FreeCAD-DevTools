@@ -30,6 +30,7 @@ import sys
 
 import FreeCAD
 import FreeCADGui
+from pivy import coin  # noqa: F401  -- registers pivy.coin for getCameraNode()
 from PySide import QtCore, QtWidgets
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
