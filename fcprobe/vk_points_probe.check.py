@@ -84,15 +84,16 @@ def check(lines, report):
         err("no frame dumps to analyze (is FC_VULKAN_DUMP_FRAME=1 set?)")
         return
 
-    # Bucket dumps by the marker whose ordinal is <= the dump ordinal.
+    # The probe stamps each phase marker at the END of the phase (after its
+    # frames are rendered), so a dumped frame belongs to the FIRST marker whose
+    # ordinal is >= the frame ordinal -- the phase it was rendered for.
+    ordered_marks = sorted(marks)
+
     def phase_of(ford):
-        best, best_ord = "boot", -1
-        for ordv, name in marks:
-            if ordv <= ford and ordv > best_ord:
-                best, best_ord = name, ordv
-        if best_ord < 0 and marks:
-            best = marks[0][1]
-        return best
+        for ordv, name in ordered_marks:
+            if ordv >= ford:
+                return name
+        return ordered_marks[-1][1] if ordered_marks else "boot"
 
     bucketed = {}
     for ford, c in counts:

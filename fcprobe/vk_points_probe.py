@@ -29,6 +29,14 @@ def log(msg):
     print("POINTS " + msg, flush=True)
 
 
+def settle(ms):
+    timer = QtCore.QElapsedTimer()
+    timer.start()
+    while timer.elapsed() < ms:
+        QtCore.QCoreApplication.processEvents()
+        QtCore.QThread.msleep(10)
+
+
 s = Session(name="points")
 steps = [0]
 
@@ -59,10 +67,22 @@ def step():
         s.set_pref(VIEW, "VulkanShowPoints", False)
         s.set_pref(VIEW, "VulkanEdgeColor", 0xFF0000FF)
         build_scene()
+        # Force actual frames: the viewport is demand-driven and the scene alone
+        # does not guarantee a present before the dump window closes.
+        settle(300)
+        s.vulkan_render()
+        settle(700)
         s.frame_phase("baseline")
         log("phase=baseline (points off)")
     elif k == 3:
+        # The point overlay reaches the renderer asynchronously via the pref
+        # observer.  Pump the loop first so the push is delivered, THEN force a
+        # frame, so a dump actually captures points=1 (otherwise the phase
+        # reuses the baseline frame and the host check sees no change).
         s.set_pref(VIEW, "VulkanShowPoints", True)
+        settle(300)
+        s.vulkan_render()
+        settle(700)
         s.frame_phase("points")
         log("phase=points (VulkanShowPoints on)")
     elif k == 5:

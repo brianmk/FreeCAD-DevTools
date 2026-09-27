@@ -50,7 +50,7 @@
         "FC_VULKAN_BREADCRUMBS": "1",
         "FC_VULKAN_DUMP_FRAME": "1",
         "FC_VULKAN_DUMP_START": "0",
-        "FC_VULKAN_DUMP_END": "6"
+        "FC_VULKAN_DUMP_END": "400"
       },
       "timeout": 300
     },
@@ -62,7 +62,7 @@
         "FC_VULKAN_BREADCRUMBS": "1",
         "FC_VULKAN_DUMP_FRAME": "1",
         "FC_VULKAN_DUMP_START": "0",
-        "FC_VULKAN_DUMP_END": "6"
+        "FC_VULKAN_DUMP_END": "400"
       },
       "timeout": 300
     },
@@ -88,7 +88,7 @@
         "FC_VULKAN_BACKEND_DEBUG": "1",
         "FC_VULKAN_DUMP_FRAME": "1",
         "FC_VULKAN_DUMP_START": "0",
-        "FC_VULKAN_DUMP_END": "6"
+        "FC_VULKAN_DUMP_END": "400"
       },
       "timeout": 300
     }

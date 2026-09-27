@@ -33,6 +33,14 @@ def log(msg):
     print("PREFS " + msg, flush=True)
 
 
+def settle(ms):
+    timer = QtCore.QElapsedTimer()
+    timer.start()
+    while timer.elapsed() < ms:
+        QtCore.QCoreApplication.processEvents()
+        QtCore.QThread.msleep(10)
+
+
 s = Session(name="prefs")
 PHASES = [
     ("baseline", {"VulkanEdgeOverlay": False, "VulkanShowPoints": False}),
@@ -48,6 +56,14 @@ def apply_phase(idx):
     name, prefs = PHASES[idx]
     for key, value in prefs.items():
         s.set_pref(VIEW, key, value)
+    # The pref observer pushes the new overlay state asynchronously and the
+    # demand-driven viewport only presents on request.  Pump the loop so the
+    # push is delivered, THEN force a frame, so the dump for this phase is
+    # actually rendered with the new state (otherwise the host check compares
+    # stale dumps).
+    settle(300)
+    s.vulkan_render()
+    settle(700)
     s.frame_phase(name)
     log(f"phase={name} edgeOverlay={prefs.get('VulkanEdgeOverlay', '?')} "
         f"points={prefs.get('VulkanShowPoints', '?')}")
