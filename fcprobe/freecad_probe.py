@@ -2753,6 +2753,15 @@ class Session:
         self._QtGui = QtGui
         self._QtWidgets = QtWidgets
 
+        # Load pivy's Coin SWIG module.  FreeCAD's view.getCameraNode() builds
+        # the node proxy through pivy.coin, so without it the call raises
+        # "No SWIG wrapped library loaded" (a release build does not import it
+        # for us).  Doing it once here covers every probe that reads the camera.
+        try:
+            from pivy import coin  # noqa: F401
+        except Exception:
+            pass
+
         self.win, self.container, self.stack = self.find_viewport()
         self.available = self.container is not None
         self.dpr = self.container.devicePixelRatioF() if self.available else 1.0

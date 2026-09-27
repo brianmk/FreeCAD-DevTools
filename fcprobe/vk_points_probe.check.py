@@ -19,7 +19,7 @@ import re
 
 EDGE_LINE = re.compile(
     r"\[VK-TRACE\] View3DInventorViewer::applyVulkanSettings "
-    r"wireframe=(\d+) points=(\d+)")
+    r"edgeOverlay=(\d+) points=(\d+)")
 PHASE_LINE = re.compile(r"\[HARNESS\] frame_phase phase=(\S+) frame=(\d+)")
 RED = (255, 0, 0)
 TOL = 12
