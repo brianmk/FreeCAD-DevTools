@@ -80,6 +80,13 @@ def step():
     if k == 1:
         s.set_pref(VIEW, "UseVulkanRenderer", True)
         s.set_pref(VIEW, "VulkanRenderMode", 1)  # raster Vulkan
+        # The suite runs this case after points/prefs, which leave the Vulkan
+        # edge/points overlays ON in the shared user config.  A red overlay is
+        # re-drawn over the fill geometry and covers the material, so reset
+        # them: the metalness/roughness response must be measured on the lit
+        # fill, not under an overlay.
+        s.set_pref(VIEW, "VulkanEdgeOverlay", False)
+        s.set_pref(VIEW, "VulkanShowPoints", False)
         FreeCADGui.activateWorkbench("PartWorkbench")
         build()
         log("built sphere")

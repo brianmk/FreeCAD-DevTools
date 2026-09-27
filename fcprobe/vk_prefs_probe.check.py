@@ -23,6 +23,7 @@ import re
 EDGE_LINE = re.compile(
     r"\[VK-TRACE\] View3DInventorViewer::applyVulkanSettings "
     r"edgeOverlay=(\d+) points=(\d+)")
+PHASE_LINE = re.compile(r"\[HARNESS\] frame_phase phase=(\S+) frame=(\d+)")
 MIN_PX = 50
 
 
@@ -33,22 +34,26 @@ def _breadcrumbs(lines):
 
 
 def _edge_counts(frames_dir):
+    """[(frame_ordinal, red_dominant_px)] for every dumped frame, by ordinal."""
     try:
         from PIL import Image
     except ImportError:
         return None
     import numpy as np
     out = []
-    for p in sorted(glob.glob(os.path.join(frames_dir, "*.png"))):
+    for p in glob.glob(os.path.join(frames_dir, "*.png")):
+        m = re.search(r"(\d+)", os.path.basename(p))
+        if not m:
+            continue
+        ordv = int(m.group(1))
         a = np.asarray(Image.open(p).convert("RGB"), dtype=np.int32)
         # The overlay draws 1px lines, which the rasterizer anti-aliases, so a
         # partial-coverage edge pixel blends toward the dark background (e.g.
         # (199,8,8) or (185,44,46)) and is not exactly (255,0,0).  Count
-        # red-dominant pixels instead; the baseline (edges off) has none, so the
-        # on/off signal stays clean.
+        # red-dominant pixels instead.
         r, g, b = a[..., 0], a[..., 1], a[..., 2]
-        out.append(int(((r >= 120) & (r >= g + 40) & (r >= b + 40)).sum()))
-    return out
+        out.append((ordv, int(((r >= 120) & (r >= g + 40) & (r >= b + 40)).sum())))
+    return sorted(out)
 
 
 def check(lines, report):
@@ -79,8 +84,42 @@ def check(lines, report):
     if not counts:
         err("no frame dumps to analyze (is FC_VULKAN_DUMP_FRAME=1 set?)")
         return
-    if max(counts) < MIN_PX:
-        err(f"no frame renders red edge pixels"
-            f" (max {max(counts)} px, need >= {MIN_PX})")
-    if 0 not in counts:
-        err("no frame with 0 edge pixels (edge overlay may be stuck on)")
+
+    # Attribute each dumped frame to a phase.  The baseline is NOT assumed to be
+    # strictly zero: the 3D scene itself may draw a few red-dominant pixels
+    # (e.g. the origin/axis cross), so the invariant is a DELTA -- the edge-on
+    # frames must add edge pixels over the edge-off baseline.
+    marks = [(int(m.group(2)), m.group(1))
+             for line in lines for m in [PHASE_LINE.search(line)] if m]
+    if not marks:
+        err("no [HARNESS] frame_phase markers (cannot attribute dumps to phases)")
+        return
+
+    # The probe stamps each phase marker at the END of the phase (after its
+    # frames are rendered), so a dumped frame belongs to the FIRST marker whose
+    # ordinal is >= the frame ordinal -- the phase it was rendered for.
+    ordered_marks = sorted(marks)
+
+    def phase_of(ford):
+        for ordv, name in ordered_marks:
+            if ordv >= ford:
+                return name
+        return ordered_marks[-1][1] if ordered_marks else "boot"
+
+    bucketed = {}
+    for ford, c in counts:
+        bucketed.setdefault(phase_of(ford), []).append(c)
+
+    off = max(bucketed.get("baseline", [0]), default=0)
+    on = [c for name, cs in bucketed.items() if name != "baseline" for c in cs]
+    on_max = max(on, default=0)
+    report.session["prefs_edge_px"] = {
+        "baseline_max": off, "edge_on_max": on_max,
+        "by_phase": {k: max(v) for k, v in bucketed.items()},
+    }
+    if on_max < MIN_PX:
+        err(f"no edge-on frame renders red edge pixels"
+            f" (max {on_max} px, need >= {MIN_PX})")
+    if on_max <= off:
+        err(f"edge-on frames (max {on_max} px) did not exceed the edge-off "
+            f"baseline ({off} px): edge overlay not drawn or stuck on")

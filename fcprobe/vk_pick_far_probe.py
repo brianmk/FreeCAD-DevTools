@@ -30,6 +30,7 @@ import sys
 
 import FreeCAD
 import FreeCADGui
+from pivy import coin  # noqa: F401  -- registers pivy.coin for getCameraNode()
 from PySide import QtCore, QtWidgets
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -143,8 +144,17 @@ def main():
     pick_only = None
     for x, y in hits[:8]:
         s.move(x, y)
-        settle(220)
-        pre = FreeCADGui.Selection.getPreselection()
+        # The preselection is updated asynchronously by the viewport's event
+        # path and lags on a software renderer (lavapipe in CI); a single fixed
+        # delay made the first sampled point report a spurious "pick but NO
+        # hover".  Poll instead -- a genuine miss still yields None after the
+        # bounded wait.  Mirrors vk_pick_probe.py's sample_hover().
+        pre = None
+        for _ in range(6):
+            settle(80)
+            pre = FreeCADGui.Selection.getPreselection()
+            if pre and pre.ObjectName:
+                break
         hover = pre.ObjectName if (pre and pre.ObjectName) else None
         info = s.get_object_info(x, y)
         log(f"sample at=({x},{y}) hover={hover is not None} pick={info is not None}")

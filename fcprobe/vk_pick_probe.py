@@ -65,9 +65,18 @@ def sample_hover(s, x, y):
     s.move(x, y)
     # The preselection is updated asynchronously by the viewport's event path;
     # reading it right after move() returns the previous position's value (a
-    # stale Edge2 at the right edge).  Let it settle before reading.
-    settle(60)
-    pre = FreeCADGui.Selection.getPreselection()
+    # stale Edge2 at the right edge).  Let it settle before reading.  A single
+    # fixed delay is not enough: the first sample after a camera/scene change,
+    # and every sample on a slow software renderer (lavapipe in CI), can lag
+    # further, which made the first refined boundary pixel report a spurious
+    # "pick hit but NO hover".  Poll instead of trusting one delay; a point
+    # that genuinely has no hover still yields None after the bounded wait.
+    pre = None
+    for _ in range(4):
+        settle(60)
+        pre = FreeCADGui.Selection.getPreselection()
+        if pre and pre.ObjectName:
+            break
     hover = None
     if pre and pre.ObjectName:
         subs = getattr(pre, "SubElementNames", None) or []
