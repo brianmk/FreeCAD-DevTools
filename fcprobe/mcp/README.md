@@ -50,8 +50,16 @@ cp -r "$FREECAD_DEVTOOLS/fcprobe/mcp" \
 The **MCP** workbench toolbar (or the *Toggle MCP Server* command) turns the
 socket on/off; the choice is persisted in *Preferences → MCP* and applied at
 startup (default: on).  *Copy MCP Socket Path* puts the socket path on the
-clipboard.  Default socket: `/tmp/opencode/freecad_mcp.sock`
-(override with `FC_MCP_SOCKET=/path`).
+clipboard.
+
+Each FreeCAD binds its **own** socket, ``<dir>/freecad_mcp.<pid>.sock`` (default
+dir `/tmp/opencode`), so several sessions can run at once without clobbering
+each other.  The server auto-targets the newest live instance; `list_instances`
+enumerates them and `select_instance` pins one.  Set `FC_MCP_SOCKET_DIR=/path`
+to relocate the directory, or `FC_MCP_SOCKET=/path` to pin one explicit socket
+(single-instance / tests).  Stale sockets from an exited or crashed FreeCAD are
+unlinked automatically by the guest (clean exit / SIGTERM) and by the server
+(PID-liveness sweep) respectively.
 
 ## Launching the guest manually
 
@@ -74,8 +82,9 @@ env LD_LIBRARY_PATH=/tmp/opencode/boost91 QT_STYLE_OVERRIDE=fusion \
     build/debug/bin/FreeCADCmd "$FREECAD_DEVTOOLS/fcprobe/mcp/freecad_mcp_guest.py"
 ```
 
-You should see `/tmp/opencode/freecad_mcp.sock` appear (override with
-`FC_MCP_SOCKET=/path`).
+You should see a per-instance socket appear under `/tmp/opencode/`
+(`freecad_mcp.<pid>.sock`; override the directory with
+`FC_MCP_SOCKET_DIR=/path`).
 
 ### 2. Start the MCP server
 

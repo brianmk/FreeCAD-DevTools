@@ -19,11 +19,15 @@ Lifecycle / connection:
       and waits for its socket (the addon opens it; no script path is passed).
 
 Configuration (environment / CLI):
-    FC_MCP_SOCKET   Unix socket path (default /tmp/opencode/freecad_mcp.sock)
+    FC_MCP_SOCKET_DIR  directory of per-instance sockets (default /tmp/opencode).
+                       Each FreeCAD binds ``freecad_mcp.<pid>.sock``; the server
+                       auto-discovers the newest live one.
+    FC_MCP_SOCKET      pin one explicit socket path (disables discovery)
     FREECAD_BIN     FreeCAD binary (default build/debug/bin/FreeCAD)
     --spawn         launch FreeCAD if no guest is running (addon opens the socket)
     --headless      spawn FreeCADCmd (guest run as a script) instead of the GUI
     --env K=V       extra env for a spawned FreeCAD (repeatable)
+    --socket PATH   pin one socket path; --socket-dir DIR relocates discovery
 """
 
 import json
@@ -46,7 +50,12 @@ GUEST = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                      "freecad_mcp_guest.py")
 DEFAULT_BIN = os.environ.get("FREECAD_BIN") or os.path.join(
     ROOT, "build/debug/bin/FreeCAD")
-SOCKET_PATH = os.environ.get("FC_MCP_SOCKET", "/tmp/opencode/freecad_mcp.sock")
+SOCKET_DIR = os.environ.get("FC_MCP_SOCKET_DIR", "/tmp/opencode")
+SOCKET_GLOB_PREFIX = "freecad_mcp."
+SOCKET_FILE_SUFFIX = ".sock"
+# Explicit pin (--socket / FC_MCP_SOCKET); "" means auto-discover the newest
+# live per-instance socket under SOCKET_DIR.
+_PINNED_SOCKET = os.environ.get("FC_MCP_SOCKET") or ""
 
 # A spawned FreeCAD needs the harness display/background env; the boost lib path
 # is required by this debug build.  Writes are kept as pure passthrough of the
@@ -70,22 +79,131 @@ class FreeCADConnectionError(RuntimeError):
     pass
 
 
-class GuestClient:
-    """Thin line-delimited JSON RPC client to the in-FreeCAD guest agent."""
+def _pid_alive(pid: int) -> bool:
+    """True while *pid* exists and is not a zombie (Linux /proc; else kill(0))."""
+    if pid <= 0:
+        return False
+    if os.path.isdir("/proc"):
+        try:
+            with open(f"/proc/{pid}/stat", "rb") as fh:
+                fields = fh.read().split()
+            return bool(fields) and fields[2:3] != [b"Z"]
+        except OSError:
+            return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
 
-    def __init__(self, sock_path: str = SOCKET_PATH, timeout: float = 30.0):
-        self.sock_path = sock_path
+
+def _instance_pid(path: str) -> int:
+    """PID encoded in a ``freecad_mcp.<pid>.sock`` name (0 if not that shape)."""
+    name = os.path.basename(path)
+    try:
+        return int(name[len(SOCKET_GLOB_PREFIX):-len(SOCKET_FILE_SUFFIX)])
+    except (ValueError, IndexError):
+        return 0
+
+
+def list_instance_sockets(prune: bool = True) -> List[str]:
+    """Live per-instance sockets under SOCKET_DIR, newest first.
+
+    Stale entries (owner PID gone or a zombie) are removed from disk when
+    *prune* is true - this reclaims the socket of a crashed FreeCAD, which can
+    never unlink its own file.
+    """
+    try:
+        names = os.listdir(SOCKET_DIR)
+    except OSError:
+        return []
+    live: List[tuple] = []
+    for name in names:
+        if not (name.startswith(SOCKET_GLOB_PREFIX)
+                and name.endswith(SOCKET_FILE_SUFFIX)):
+            continue
+        path = os.path.join(SOCKET_DIR, name)
+        pid = _instance_pid(path)
+        if pid > 0 and _pid_alive(pid):
+            try:
+                mtime = os.stat(path).st_mtime
+            except OSError:
+                continue
+            live.append((mtime, path))
+            continue
+        # Dead, zombie, or unparseable owner: reclaim the file (a crashed
+        # FreeCAD can never unlink its own socket).
+        if prune:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+    live.sort(reverse=True)
+    return [path for _, path in live]
+
+
+def resolve_socket() -> str:
+    """Socket the client should talk to: the pin, or the newest live instance."""
+    if _PINNED_SOCKET:
+        return _PINNED_SOCKET
+    candidates = list_instance_sockets()
+    return candidates[0] if candidates else ""
+
+
+class GuestClient:
+    """Thin line-delimited JSON RPC client to the in-FreeCAD guest agent.
+
+    With no explicit ``sock_path`` it auto-targets the newest live per-instance
+    socket each call, and falls back to another live instance if the chosen one
+    turns out to be dead (pruning that stale entry).
+    """
+
+    def __init__(self, sock_path: Optional[str] = None, timeout: float = 30.0):
+        self._pinned = sock_path      # None => auto-discover
         self.timeout = timeout
 
+    @property
+    def sock_path(self) -> str:
+        return self._pinned or resolve_socket()
+
+    def _candidates(self) -> List[str]:
+        pin = self._pinned if self._pinned is not None else _PINNED_SOCKET
+        if pin:
+            return [pin] if os.path.exists(pin) else []
+        return list_instance_sockets()
+
     def call(self, method: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        if not os.path.exists(self.sock_path):
+        candidates = self._candidates()
+        if not candidates:
+            where = self._pinned or SOCKET_DIR
             raise FreeCADConnectionError(
-                f"no live FreeCAD guest at {self.sock_path} - enable the "
+                f"no live FreeCAD guest at {where} - enable the "
                 f"FreeCAD-MCP addon in FreeCAD (or run this server with --spawn)")
+        last_exc: Optional[BaseException] = None
+        for path in candidates:
+            try:
+                return self._call_one(path, method, params)
+            except (OSError, socket.timeout, json.JSONDecodeError) as exc:
+                last_exc = exc
+                # Only a definitively-dead socket is pruned; a timeout on a busy
+                # (but live) instance leaves its socket for the next attempt.
+                pin = self._pinned if self._pinned is not None else _PINNED_SOCKET
+                if not pin and isinstance(
+                        exc, (ConnectionRefusedError, FileNotFoundError)):
+                    try:
+                        os.unlink(path)
+                    except OSError:
+                        pass
+                continue
+        raise FreeCADConnectionError(
+            f"could not reach a FreeCAD guest ({last_exc}); is the guest running?") from last_exc
+
+    def _call_one(self, path: str, method: str,
+                  params: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         conn.settimeout(self.timeout)
         try:
-            conn.connect(self.sock_path)
+            conn.connect(path)
             req = {"id": 0, "method": method, "params": params or {}}
             conn.sendall((json.dumps(req) + "\n").encode("utf-8"))
             buf = b""
@@ -96,10 +214,6 @@ class GuestClient:
                 buf += chunk
             line = buf.split(b"\n", 1)[0]
             resp = json.loads(line.decode("utf-8"))
-        except (OSError, socket.timeout) as exc:
-            raise FreeCADConnectionError(
-                f"could not reach FreeCAD guest ({exc}); is the guest running "
-                f"and the socket at {self.sock_path}?") from exc
         finally:
             try:
                 conn.close()
@@ -145,7 +259,11 @@ def _merge_env(overrides: Dict[str, str]) -> Dict[str, str]:
     env.update(SPAWN_ENV)
     if not env.get("LD_LIBRARY_PATH"):
         env["LD_LIBRARY_PATH"] = SPAWN_ENV["LD_LIBRARY_PATH"]
-    env["FC_MCP_SOCKET"] = SOCKET_PATH
+    if _PINNED_SOCKET:
+        env["FC_MCP_SOCKET"] = _PINNED_SOCKET
+    else:
+        # Auto mode: let the child name its own per-PID socket.
+        env.pop("FC_MCP_SOCKET", None)
     env.update({k: v for k, v in overrides.items() if v is not None})
     return env
 
@@ -154,18 +272,17 @@ def spawn_freecad(headless: bool = False,
                   env_overrides: Optional[Dict[str, str]] = None,
                   binary: Optional[str] = None,
                   wait: int = 30) -> bool:
-    """Launch FreeCAD and wait for the guest socket.
+    """Launch FreeCAD and wait for its per-instance guest socket.
 
     GUI: the FreeCAD-MCP addon shipped beside this server opens the socket when
     FreeCAD starts, so FreeCAD is launched plainly (no script argument).  This
     is why the addon must be installed in FreeCAD's Mod directory.  Headless
     FreeCADCmd does not load GUI addons, so it is pointed straight at the guest.
+
+    The guest names its socket after its own PID, which is this child's PID, so
+    the expected path is known up front and no discovery race is involved.
     """
     global _spawned
-    try:
-        os.unlink(SOCKET_PATH)
-    except OSError:
-        pass
     bincmd = binary or (os.environ.get("FREECAD_BIN") or DEFAULT_BIN)
     if not os.path.exists(bincmd):
         if headless:
@@ -177,9 +294,11 @@ def spawn_freecad(headless: bool = False,
     _spawned = subprocess.Popen(launch, env=env,
                                 stdout=subprocess.DEVNULL,
                                 stderr=subprocess.STDOUT)
+    expected = _PINNED_SOCKET or os.path.join(
+        SOCKET_DIR, f"{SOCKET_GLOB_PREFIX}{_spawned.pid}{SOCKET_FILE_SUFFIX}")
     t0 = time.time()
     while time.time() - t0 < wait:
-        if _client.is_live():
+        if os.path.exists(expected) and _client.is_live():
             return True
         if _spawned.poll() is not None:
             raise FreeCADConnectionError(
@@ -215,9 +334,41 @@ def status() -> str:
         snap = _call("snapshot")
     except Exception:
         snap = {}
+    sock = _client.sock_path
     return _fmt({"doc": data.get("doc"), "object_count": data.get("count"),
                  "selection": sel.get("selection", []),
-                 "socket": SOCKET_PATH, "snapshot": snap})
+                 "socket": sock, "pid": _instance_pid(sock) or None,
+                 "snapshot": snap})
+
+
+@mcp.tool()
+def list_instances() -> str:
+    """List the live FreeCAD MCP instances (PID + per-instance socket) and mark
+    the one this server currently targets.  Each FreeCAD binds its own
+    ``freecad_mcp.<pid>.sock``, so multiple sessions coexist."""
+    active = _client.sock_path
+    instances = [
+        {"pid": _instance_pid(path) or None, "socket": path, "active": path == active}
+        for path in list_instance_sockets()
+    ]
+    return _fmt({"socket_dir": SOCKET_DIR, "pinned": _PINNED_SOCKET or None,
+                 "active": active or None, "instances": instances})
+
+
+@mcp.tool()
+def select_instance(pid: int = 0, path: str = "") -> str:
+    """Pin this MCP server to one FreeCAD instance, by `pid` or socket `path`.
+    With neither, reset to automatic (newest live instance)."""
+    global _client
+    if pid:
+        path = os.path.join(SOCKET_DIR, f"{SOCKET_GLOB_PREFIX}{pid}{SOCKET_FILE_SUFFIX}")
+    if path:
+        if not os.path.exists(path):
+            return _error(f"no such socket: {path}")
+        _client = GuestClient(sock_path=path)
+        return _fmt({"selected": path, "pid": _instance_pid(path) or None})
+    _client = GuestClient()
+    return _fmt({"selected": "auto", "socket": _client.sock_path or None})
 
 
 @mcp.tool()
@@ -886,14 +1037,19 @@ def main(argv: Optional[List[str]] = None) -> int:
     p.add_argument("--binary", default=None, help="FreeCAD binary to spawn")
     p.add_argument("--env", action="append", default=[], metavar="K=V",
                    help="extra env for a spawned FreeCAD (repeatable)")
-    p.add_argument("--socket", default=None, help="Unix socket path")
+    p.add_argument("--socket", default=None,
+                   help="pin one Unix socket path (disables per-instance discovery)")
+    p.add_argument("--socket-dir", default=None,
+                   help="directory of per-instance sockets (default /tmp/opencode)")
     p.add_argument("--timeout", type=int, default=30,
                    help="seconds to wait for a spawned guest")
     args = p.parse_args(argv)
 
-    global SOCKET_PATH, _client
+    global SOCKET_DIR, _PINNED_SOCKET, _client
+    if args.socket_dir:
+        SOCKET_DIR = args.socket_dir
     if args.socket:
-        SOCKET_PATH = args.socket
+        _PINNED_SOCKET = args.socket
         _client = GuestClient(sock_path=args.socket)
 
     if args.spawn:
@@ -906,8 +1062,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     elif not _client.is_live():
         # Informative, not fatal: the server still starts (an MCP client may
         # attach the guest later); status/tools will surface the connection error.
-        print(f"[mcp] no live FreeCAD guest at {SOCKET_PATH}; tools will fail "
-              f"until the guest starts (see README)", file=sys.stderr)
+        where = _PINNED_SOCKET or SOCKET_DIR
+        print(f"[mcp] no live FreeCAD guest at {where}; tools will fail "
+              f"until a guest starts (see README)", file=sys.stderr)
 
     mcp.run(transport="stdio")
     return 0
