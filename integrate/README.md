@@ -26,17 +26,23 @@ integrate/
 │           ├── vulkan-backend-*.cpp           (19 raster backend tests)
 │           ├── vulkan-light-stability-test.cpp
 │           └── vulkan-rendermanager-*.cpp
-└── gui-probes/                   B) Python in-GUI probes
-    ├── run.sh
-    └── probes/
-        ├── geom.py               box / cylinder / sphere
-        ├── camera.py             isometric / top / front / fitAll
-        ├── edges.py              wireframe / points overlay toggles
-        ├── mouse.py              hover + click-select (real pick)
-        └── gl.py                 GL fallback (VulkanRenderMode=0)
+├── gui-probes/                   B) Python in-GUI probes
+│   ├── run.sh
+│   └── probes/
+│       ├── geom.py               box / cylinder / sphere
+│       ├── camera.py             isometric / top / front / fitAll
+│       ├── edges.py              wireframe / points overlay toggles
+│       ├── mouse.py              hover + click-select (real pick)
+│       └── gl.py                 GL fallback (VulkanRenderMode=0)
+├── wide-line-lod/                C) GPU-free wide-line predicate test (+ ctest)
+│   ├── CMakeLists.txt            standalone; links an already-built libCoin
+│   ├── widelinelod-test.cpp      isWideLine()/lineSegmentCount() semantics
+│   └── README.md
+└── checks/                       D) out-of-tree source guard checks (no build)
+    └── vulkan_guard_check.py     Vulkan-only include/symbol guard consistency
 ```
 
-Both suites are specific to the integration branch and are independent of
+All four are specific to the integration branch and are independent of
 `fcprobe/` (the general FreeCAD probe harness) and `DevTools/`.
 
 ---
@@ -117,6 +123,10 @@ own `main()`:
 `VulkanBackendRetainedChangeTest`, `VulkanBackendParallelTest`,
 `VulkanRenderManagerTest`, `VulkanRenderManagerVisibilityTest`,
 `VulkanLightStabilityTest` — plus `vulkan/VulkanTestHarness.h`.
+
+The wide-line predicate test does **not** live in this Coin-derived port: it has
+its own GPU-free suite, `wide-line-lod/` (section C below).  The product trees
+carry the fixes; the tests live with the suites.
 
 **Retained-IR / core (7)**: `CoreTraversalTest`,
 `DrawListSortStabilityTest`, `SceneManagerCoreTest`, `RetainedIRTest`,
@@ -221,6 +231,69 @@ failed**.
 To keep the validation layer quiet but present for a debug run, export
 `FC_VULKAN_VALIDATION=1`; the runner already does this for the `validation`
 probe only.
+
+---
+
+## C) Wide-line / interaction-LOD predicate test (no GPU)
+
+```bash
+cmake -S integrate/wide-line-lod -B /tmp/wide-line-lod -G Ninja
+cmake --build /tmp/wide-line-lod
+ctest --test-dir /tmp/wide-line-lod --output-on-failure
+```
+
+`WideLineLodTest` builds against the already-built `libCoin` and exercises the
+shared wide-line predicate (`isWideLine()`, `lineSegmentCount()`,
+`kLargeLineSetMinSegments`): interaction LOD keeps small width>1 line sets (the
+Sketcher grid's division lines) on the wide path, downgrades only large ones,
+and never downgrades stippled lines or overlay redraws.  See
+`wide-line-lod/README.md`.  It is deliberately outside the Coin-derived port in
+`coin-vulkan-tests/`: the product trees carry the fixes, the tests live here.
+
+---
+
+## D) Source guard check
+
+```bash
+# changed files of the target checkout (default --repo, see Prerequisites)
+integrate/checks/vulkan_guard_check.py
+
+# whole src/ tree, and fail if the branch is behind its base
+integrate/checks/vulkan_guard_check.py --all --strict-base
+
+# another checkout / base
+integrate/checks/vulkan_guard_check.py --repo ~/dev/FreeCAD-Integrate/FreeCAD-vulkan
+```
+
+Read-only, no build, sub-second.  It reproduces the **non-Vulkan** configuration
+(`FREECAD_USE_VULKAN`, `HAVE_COIN_IR_RENDER_ACTION`,
+`COIN_BUILD_VULKAN_RENDERER` all undefined) statically and reports:
+
+* an `#include` of a Coin retained-render header (`SoVulkanViewMode.h`,
+  `SoVulkanViewSettings.h`, `SoRenderIR.h`, `SoIRRenderAction.h`,
+  `SoDevicePixelRatioElement.h`, `SoVulkanImageCopy/RenderManager/RenderTarget.h`)
+  or `QuarterVulkanWidget.h` that is not compiled out when Vulkan is off;
+* a *scoped* use of one of those symbols (`SoVulkanViewMode::Raster`) that is not
+  guarded.  Bare mentions are ignored, so forward declarations
+  (`class SoIRRenderAction;`) and pointer members do not false-positive;
+* `#else`/`#elif` branches are tracked, so a leak in the non-Vulkan branch of
+  `#ifdef FREECAD_USE_VULKAN ... #else <leak> #endif` is found too.
+
+Files CMake only builds with Vulkan (`Quarter/QuarterVulkanWidget.{h,cpp}`) are
+skipped.  Exit `0` clean, `1` violation (or stale under `--strict-base`), `2`
+usage/git error.  `--strict-base` also warns/fails when `HEAD` is behind
+`--base` (default `origin/freecad-integrate`) — the stale-branch trap: a branch
+cut from an old integration tip silently lacks base guard/lock fixes.
+
+Real case it was written for: `src/Gui/VulkanViewSettings.h` included
+`<Inventor/rendering/SoVulkanViewMode.h>` unguarded while being included
+unconditionally by `View3DInventor.h`; the `FreeCAD CI approved` non-Vulkan job
+died with `Inventor/rendering/SoVulkanViewMode.h: No such file or directory`.
+The checker flags exactly that line.
+
+It does **not** replace a non-Vulkan compile: link errors (e.g. an unguarded
+`Q_SLOT` definition, LNK2019) and `-Wunused-but-set-variable` cases still need a
+real build.
 
 ---
 
