@@ -26,6 +26,8 @@ COUNTERS = re.compile(
 
 PHASE = re.compile(r"PREVIEWRESTAMP phase=(\w+) preview=(\w+) camera=([\d,.\-]+)")
 
+ARMED = re.compile(r"\[RTDBG\] lastViewArmed retained=(\d+) armed=(\d+)")
+
 
 def check(lines, report):
     counters = [m for m in (COUNTERS.search(line) for line in lines) if m]
@@ -56,6 +58,22 @@ def check(lines, report):
             "(staleOverlayAfter=%d): the preview is drawn where the previous camera "
             "put it instead of following the camera" % stale_after
         )
+
+    armed = [m for m in (ARMED.search(line) for line in lines) if m]
+    if not armed:
+        report.add_error(
+            "no [RTDBG] lastViewArmed line: the replay bookkeeping never reported "
+            "whether it armed the restamp"
+        )
+    else:
+        unarmed = [m.group(0) for m in armed
+                   if int(m.group(1)) > 0 and int(m.group(2)) != 1]
+        if unarmed:
+            report.add_error(
+                "a retained region did not arm the replay restamp (%s): promoted "
+                "annotation commands would then keep the previous camera"
+                % unarmed[0]
+            )
 
     report.session["annotation_restamp"] = {
         "retained_overlay": retained_overlay,

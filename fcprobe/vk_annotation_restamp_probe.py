@@ -116,6 +116,18 @@ def run(session):
     phase("draft_pose_a", "draft")
     move_camera()
     phase("draft_pose_b", "draft")
+
+    # Hide the solid so the retained region is the annotation subtree alone: this is
+    # the shape where the replay bookkeeping must still arm the restamp (a selector
+    # that samples "the first non-overlay command" would never arm here).
+    try:
+        Gui.ActiveDocument.getObject("Pad").Visibility = False
+        Gui.updateGui()
+        QtCore.QCoreApplication.processEvents()
+        move_camera()
+        phase("draft_annotation_only", "draft")
+    except Exception:  # noqa: BLE001
+        pass
     Gui.Control.closeDialog()
     QtCore.QCoreApplication.processEvents()
 
