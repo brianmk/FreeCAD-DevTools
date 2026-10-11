@@ -717,31 +717,35 @@ def new_artifact_dir(parent: str, name: str) -> str:
 # XWayland, matching the target platform.  The `*-xcb` variants force the xcb
 # platform plugin for tooling that does not support Wayland (RenderDoc
 # capture/replay) or to reproduce an XWayland session.
+# Some setups need a Boost runtime dir on LD_LIBRARY_PATH; keep it optional so a
+# checkout without that directory still runs (an absent dir is ignored by the loader).
+_BOOST_LIB_DIR = "/tmp/opencode/boost91"
+
 _PROFILES = {
     "vulkan": {
         "QT_STYLE_OVERRIDE": "fusion",
         "QT_QPA_PLATFORM": "wayland",
-        "LD_LIBRARY_PATH": "/tmp/opencode/boost91",
+        "LD_LIBRARY_PATH": _BOOST_LIB_DIR,
         "FC_SKIP_UNSAVED_PROMPT": "1",
         "FC_VULKAN_BREADCRUMBS": "1",
     },
     "gl": {
         "QT_STYLE_OVERRIDE": "fusion",
         "QT_QPA_PLATFORM": "wayland",
-        "LD_LIBRARY_PATH": "/tmp/opencode/boost91",
+        "LD_LIBRARY_PATH": _BOOST_LIB_DIR,
         "FC_SKIP_UNSAVED_PROMPT": "1",
     },
     "vulkan-xcb": {
         "QT_STYLE_OVERRIDE": "fusion",
         "QT_QPA_PLATFORM": "xcb",
-        "LD_LIBRARY_PATH": "/tmp/opencode/boost91",
+        "LD_LIBRARY_PATH": _BOOST_LIB_DIR,
         "FC_SKIP_UNSAVED_PROMPT": "1",
         "FC_VULKAN_BREADCRUMBS": "1",
     },
     "gl-xcb": {
         "QT_STYLE_OVERRIDE": "fusion",
         "QT_QPA_PLATFORM": "xcb",
-        "LD_LIBRARY_PATH": "/tmp/opencode/boost91",
+        "LD_LIBRARY_PATH": _BOOST_LIB_DIR,
         "FC_SKIP_UNSAVED_PROMPT": "1",
     },
 }
@@ -1975,6 +1979,10 @@ def _cli_suite(args: Any) -> int:
                     mismatched.append(name)
             else:
                 print(f"[SUITE]   golden NEW {name}")
+                if not golden:
+                    print("[SUITE] WARNING: the golden manifest has no entries, so the "
+                          "draw-command gate compared nothing (bootstrap it with "
+                          "--golden-write after a trusted run)")
         if report.verdict != "PASS":
             failed += 1
     golden_write = getattr(args, "golden_write", None)
@@ -1991,6 +1999,9 @@ def _cli_suite(args: Any) -> int:
             failed += 1
     if mismatched:
         print(f"[SUITE] golden mismatches: {', '.join(mismatched)}")
+        failed += 1
+    if not golden and os.environ.get("FC_PROBE_REQUIRE_GOLDEN") == "1":
+        print("[SUITE] FC_PROBE_REQUIRE_GOLDEN=1 but the golden manifest is empty")
         failed += 1
     print(f"[SUITE] {len(manifest['cases'])} cases, {failed} failed")
     return 1 if failed else 0

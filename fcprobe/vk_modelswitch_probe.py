@@ -19,6 +19,7 @@ Run:
 
 import os
 import sys
+import time
 
 import FreeCAD
 import FreeCADGui
@@ -55,10 +56,11 @@ def active_view():
         return None
 
 
-def report(tag):
+def report(tag, expect_mode=None, expect_vulkan=None):
     view = active_view()
     if view is None:
         log(f"[{tag}] no active view")
+        s.error(f"{tag}: no active view")
         return
     mode = int(view.getRenderMode())
     frame = 0
@@ -76,6 +78,44 @@ def report(tag):
     if c is not None:
         cstr += f"(idx={c.currentIndex()})"
     log(f"[{tag}] renderMode={mode} frame={frame} stackCur={cur} {cstr}")
+
+    # The report was "can't change from the Coin renderer to Vulkan"; without these
+    # assertions the case passed as long as the probe did not crash.
+    if expect_mode is not None:
+        if mode != expect_mode:
+            s.error(f"{tag}: renderMode={mode}, expected {expect_mode}")
+        else:
+            s.expect(True, f"{tag}: renderMode={mode}")
+    if expect_vulkan is not None:
+        # The stack found above may belong to a dock (property view), so assert on what
+        # actually matters: forcing a frame must advance the Vulkan frame counter in
+        # Vulkan mode, and must not in Coin mode.  (The frame count is exposed by the
+        # fork's View3DInventor; requestVulkanRender() is a no-op in Coin mode.)
+        before = int(frame)
+        try:
+            view.requestVulkanRender()
+        except Exception:
+            pass
+        after = before
+        for _ in range(60):
+            FreeCADGui.updateGui()
+            QtCore.QCoreApplication.processEvents()
+            try:
+                after = int(view.getVulkanFrameCount())
+            except Exception:
+                break
+            if after != before:
+                break
+            time.sleep(0.02)
+        log(f"[{tag}] forced frame: {before} -> {after} (stackCur={cur})")
+        if expect_vulkan and after <= before:
+            s.error(f"{tag}: Vulkan page is current but forcing a frame did not "
+                    f"advance the Vulkan frame counter ({before} -> {after})")
+        elif not expect_vulkan and after != before:
+            s.error(f"{tag}: Coin/GL page is current but the Vulkan frame counter "
+                    f"advanced ({before} -> {after})")
+        else:
+            s.expect(True, f"{tag}: frame counter {before} -> {after}")
 
 
 def build():
@@ -128,20 +168,22 @@ def step():
         if v is not None:
             v.setRenderMode(0)
             FreeCADGui.updateGui()
-        report("init-coin")
+        report("init-coin", expect_mode=0, expect_vulkan=False)
     elif k == 12:
         set_mode(1)
-        report("coin->vulkan")
+        report("coin->vulkan", expect_mode=1, expect_vulkan=True)
     elif k == 24:
         set_mode(0)
-        report("vulkan->coin")
+        report("vulkan->coin", expect_mode=0, expect_vulkan=False)
     elif k == 36:
         set_mode(1)
-        report("coin->vulkan-2")
+        report("coin->vulkan-2", expect_mode=1, expect_vulkan=True)
     elif k == 48:
         view = active_view()
         mode = int(view.getRenderMode()) if view is not None else -1
         log(f"final effective renderMode={mode}")
+        if mode != 1:
+            s.error(f"final effective renderMode={mode}, expected 1")
         s.snapshot()
         s.finish("effective renderMode after coin->vulkan")
         FreeCADGui.getMainWindow().close()

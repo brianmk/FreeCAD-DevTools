@@ -1,5 +1,5 @@
 {
-  "description": "Device-agnostic Vulkan RASTER render gate. Runs on a software Vulkan device (lavapipe) in CI with the Vulkan viewport forced on (each probe sets UseVulkanRenderer=1 / VulkanRenderMode=1). Every case produces a draw-command fingerprint ([VKBE] drawlist_hash) that is compared against tools/fcprobe/golden/vk_ci_raster_hashes.json. FC_VULKAN_BACKEND_DEBUG=1 is set for every case because the [VKBE] draw-command stream (the thing fingerprinted) is only emitted with the backend debug log on. Ray-tracing cases live in vk_suite.json and require a real GPU; they are deliberately excluded here because lavapipe has no VK_KHR_acceleration_structure.",
+  "description": "Device-agnostic Vulkan RASTER render gate. Runs on a software Vulkan device (lavapipe) in CI with the Vulkan viewport forced on (each probe sets UseVulkanRenderer=1 / VulkanRenderMode=1). Every case produces a draw-command fingerprint ([VKBE] drawlist_hash) that is compared against fcprobe/golden/vk_ci_raster_hashes.json. the backend debug log is set for every case (both FC_VULKAN_BACKEND_DEBUG, which the harness checkout reads, and COIN_VULKAN_BACKEND_DEBUG, which the bundled Coin reads) because the [VKBE] draw-command stream (the thing fingerprinted) is only emitted with the backend debug log on. Ray-tracing cases live in vk_suite.json and require a real GPU; they are deliberately excluded here because lavapipe has no VK_KHR_acceleration_structure.",
   "cases": [
     {
       "name": "diag",
@@ -8,38 +8,57 @@
         "FC_VULKAN_BACKEND_DEBUG": "1",
         "FC_VULKAN_DEBUG_UTILS": "1",
         "FC_VULKAN_GPU_TIMING": "1",
-        "FC_VULKAN_PIPELINE_FEEDBACK": "1"
+        "FC_VULKAN_PIPELINE_FEEDBACK": "1",
+        "COIN_VULKAN_BACKEND_DEBUG": "1",
+        "COIN_VULKAN_DEBUG_UTILS": "1",
+        "COIN_VULKAN_GPU_TIMING": "1",
+        "COIN_VULKAN_PIPELINE_FEEDBACK": "1"
       },
       "timeout": 300
     },
     {
       "name": "modediag",
       "script": "vk_modediag_probe.py",
-      "env": { "FC_VULKAN_BACKEND_DEBUG": "1" },
+      "env": {
+        "FC_VULKAN_BACKEND_DEBUG": "1",
+        "COIN_VULKAN_BACKEND_DEBUG": "1"
+      },
       "timeout": 300
     },
     {
       "name": "modelswitch",
       "script": "vk_modelswitch_probe.py",
-      "env": { "FC_VULKAN_BACKEND_DEBUG": "1" },
+      "env": {
+        "FC_VULKAN_BACKEND_DEBUG": "1",
+        "COIN_VULKAN_BACKEND_DEBUG": "1"
+      },
       "timeout": 300
     },
     {
       "name": "scene",
       "script": "vk_scene_probe.py",
-      "env": { "FC_VULKAN_BACKEND_DEBUG": "1" },
+      "env": {
+        "FC_VULKAN_BACKEND_DEBUG": "1",
+        "COIN_VULKAN_BACKEND_DEBUG": "1"
+      },
       "timeout": 300
     },
     {
       "name": "pick",
       "script": "vk_pick_probe.py",
-      "env": { "FC_VULKAN_BACKEND_DEBUG": "1" },
+      "env": {
+        "FC_VULKAN_BACKEND_DEBUG": "1",
+        "COIN_VULKAN_BACKEND_DEBUG": "1"
+      },
       "timeout": 300
     },
     {
       "name": "pick-far",
       "script": "vk_pick_far_probe.py",
-      "env": { "FC_VULKAN_BACKEND_DEBUG": "1" },
+      "env": {
+        "FC_VULKAN_BACKEND_DEBUG": "1",
+        "COIN_VULKAN_BACKEND_DEBUG": "1"
+      },
       "timeout": 300
     },
     {
@@ -50,7 +69,12 @@
         "FC_VULKAN_BREADCRUMBS": "1",
         "FC_VULKAN_DUMP_FRAME": "1",
         "FC_VULKAN_DUMP_START": "0",
-        "FC_VULKAN_DUMP_END": "400"
+        "FC_VULKAN_DUMP_END": "400",
+        "COIN_VULKAN_BACKEND_DEBUG": "1",
+        "COIN_VULKAN_BREADCRUMBS": "1",
+        "COIN_VULKAN_DUMP_FRAME": "1",
+        "COIN_VULKAN_DUMP_START": "0",
+        "COIN_VULKAN_DUMP_END": "400"
       },
       "timeout": 300
     },
@@ -62,7 +86,12 @@
         "FC_VULKAN_BREADCRUMBS": "1",
         "FC_VULKAN_DUMP_FRAME": "1",
         "FC_VULKAN_DUMP_START": "0",
-        "FC_VULKAN_DUMP_END": "400"
+        "FC_VULKAN_DUMP_END": "400",
+        "COIN_VULKAN_BACKEND_DEBUG": "1",
+        "COIN_VULKAN_BREADCRUMBS": "1",
+        "COIN_VULKAN_DUMP_FRAME": "1",
+        "COIN_VULKAN_DUMP_START": "0",
+        "COIN_VULKAN_DUMP_END": "400"
       },
       "timeout": 300
     },
@@ -71,20 +100,29 @@
       "script": "vk_geomlod_probe.py",
       "env": {
         "FC_VULKAN_BACKEND_DEBUG": "1",
-        "FC_VULKAN_GEOM_LOD_ALWAYS": "1"
+        "FC_VULKAN_GEOM_LOD_ALWAYS": "1",
+        "COIN_VULKAN_BACKEND_DEBUG": "1",
+        "COIN_VULKAN_GEOM_LOD_ALWAYS": "1"
       },
       "timeout": 300
     },
     {
       "name": "interaction",
       "script": "vk_interaction_probe.py",
-      "env": { "FC_VULKAN_BACKEND_DEBUG": "1" },
+      "env": {
+        "FC_VULKAN_BACKEND_DEBUG": "1",
+        "COIN_VULKAN_BACKEND_DEBUG": "1"
+      },
       "timeout": 300
     },
     {
       "name": "grid-lod",
       "script": "vk_grid_lod_probe.py",
-      "env": { "COIN_VULKAN_BACKEND_DEBUG": "1", "FC_VULKAN_LOD_TRACE": "1" },
+      "env": {
+        "COIN_VULKAN_BACKEND_DEBUG": "1",
+        "FC_VULKAN_LOD_TRACE": "1",
+        "COIN_VULKAN_LOD_TRACE": "1"
+      },
       "timeout": 300
     },
     {
@@ -94,15 +132,37 @@
         "FC_VULKAN_BACKEND_DEBUG": "1",
         "FC_VULKAN_DUMP_FRAME": "1",
         "FC_VULKAN_DUMP_START": "0",
-        "FC_VULKAN_DUMP_END": "400"
+        "FC_VULKAN_DUMP_END": "400",
+        "COIN_VULKAN_BACKEND_DEBUG": "1",
+        "COIN_VULKAN_DUMP_FRAME": "1",
+        "COIN_VULKAN_DUMP_START": "0",
+        "COIN_VULKAN_DUMP_END": "400"
       },
       "timeout": 300
     },
     {
       "name": "navicube-hover",
       "script": "vk_navicube_hover_probe.py",
-      "env": { "FC_VULKAN_BREADCRUMBS": "1" },
+      "env": {
+        "FC_VULKAN_BREADCRUMBS": "1",
+        "COIN_VULKAN_BREADCRUMBS": "1",
+        "COIN_VULKAN_BACKEND_DEBUG": "1"
+      },
       "timeout": 300
+    },
+    {
+      "name": "annotation-restamp",
+      "script": "vk_annotation_restamp_probe.py",
+      "env": {
+        "COIN_VULKAN_BACKEND_DEBUG": "1"
+      },
+      "timeout": 900
+    },
+    {
+      "name": "tool-cursor",
+      "script": "vk_tool_cursor_probe.py",
+      "env": {},
+      "timeout": 900
     }
   ]
 }
