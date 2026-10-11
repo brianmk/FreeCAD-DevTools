@@ -83,8 +83,8 @@ class McpToggleCmd:
         return {"Pixmap": _icon(),
                 "MenuText": "Stop MCP server" if running else "Start MCP server",
                 "ToolTip": "Start or stop the in-process MCP socket server for "
-                           "external clients (FC_MCP_SOCKET, default "
-                           "/tmp/opencode/freecad_mcp.sock)"}
+                           "external clients (per-instance socket under "
+                           "FC_MCP_SOCKET_DIR, default /tmp/opencode)"}
 
     def IsActive(self):
         return True

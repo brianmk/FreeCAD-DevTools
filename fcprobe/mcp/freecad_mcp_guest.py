@@ -23,7 +23,11 @@ connection; the listener thread does the socket I/O and hands each job to the
 main-thread executor.
 
 Configuration (environment):
-    FC_MCP_SOCKET   path for the Unix socket (default /tmp/opencode/freecad_mcp.sock)
+    FC_MCP_SOCKET_DIR  directory for per-instance sockets (default /tmp/opencode).
+                       Each FreeCAD binds ``freecad_mcp.<pid>.sock`` here so a
+                       second instance cannot clobber the first.
+    FC_MCP_SOCKET      pin one explicit socket path instead (single-instance /
+                       tests); disables the per-PID naming.
 
 Nothing harness/FULL-CAD specific fires except inside this process; the agent is
 purely additive to a normal interactive FreeCAD session.
@@ -52,7 +56,14 @@ FCPROBE_DIR = os.path.dirname(MCP_PARENT)
 if FCPROBE_DIR not in sys.path:
     sys.path.insert(0, FCPROBE_DIR)
 
-SOCKET_PATH = os.environ.get("FC_MCP_SOCKET", "/tmp/opencode/freecad_mcp.sock")
+# Socket location.  Every FreeCAD process gets its own socket by default so a
+# second instance cannot clobber the first: the file name embeds this PID under
+# SOCKET_DIR.  Set FC_MCP_SOCKET to pin one explicit path (single-instance /
+# tests); FC_MCP_SOCKET_DIR relocates the per-instance directory.
+SOCKET_DIR = os.environ.get("FC_MCP_SOCKET_DIR", "/tmp/opencode")
+_PINNED_SOCKET = os.environ.get("FC_MCP_SOCKET") or ""
+SOCKET_PATH = _PINNED_SOCKET or os.path.join(
+    SOCKET_DIR, f"freecad_mcp.{os.getpid()}.sock")
 
 # ---------------------------------------------------------------------------
 # Process output capture (the "logs")
@@ -1052,7 +1063,14 @@ def restart_freecad(params: Dict[str, Any]) -> Dict[str, Any]:
     removed = _clear_recovery_cache() if clean else 0
 
     env = dict(os.environ)
-    env["FC_MCP_SOCKET"] = SOCKET_PATH
+    # Auto (per-PID) sockets: let the replacement pick a fresh
+    # ``freecad_mcp.<newpid>.sock`` rather than inherit our (soon-dead) name,
+    # whose PID liveness check would otherwise prune it.  A pinned path is
+    # reused so an MCP server pinned to it keeps working across the restart.
+    if _PINNED_SOCKET:
+        env["FC_MCP_SOCKET"] = _PINNED_SOCKET
+    else:
+        env.pop("FC_MCP_SOCKET", None)
     env.setdefault("QT_STYLE_OVERRIDE", "fusion")
     if path:
         env["FC_MCP_OPEN_DOC"] = path
@@ -2469,6 +2487,7 @@ def _install_sigint_handler() -> None:
     import signal
 
     def _on_sigint(signum, _frame):  # noqa: ARG001
+        _cleanup_socket()
         os._exit(128 + signum)
 
     try:
@@ -2484,6 +2503,134 @@ _server_sock: Optional[socket.socket] = None
 _server_thread: Optional[threading.Thread] = None
 _server_timer: Any = None
 _server_path: Optional[str] = None
+_SOCK_INODE: Optional[tuple] = None   # (st_dev, st_ino) of our bound socket
+_shutdown_hooks_installed = False
+
+
+def _socket_identity(path: str) -> Optional[tuple]:
+    """(st_dev, st_ino) for *path*, or None if it does not exist."""
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    return (st.st_dev, st.st_ino)
+
+
+def _pid_alive(pid: int) -> bool:
+    """True while *pid* exists and is not a zombie (Linux /proc; else kill(0))."""
+    if pid <= 0:
+        return False
+    if os.path.isdir("/proc"):
+        try:
+            with open(f"/proc/{pid}/stat", "rb") as fh:
+                fields = fh.read().split()
+            # field 0 is the pid, field 1 is (comm) which may contain spaces,
+            # field 2 is the single-char state; "Z" means a reaped-but-lingering
+            # zombie whose socket is dead.
+            return bool(fields) and fields[2:3] != [b"Z"]
+        except OSError:
+            return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def prune_stale_sockets(directory: Optional[str] = None) -> List[str]:
+    """Unlink per-instance sockets left behind by a crashed FreeCAD.
+
+    Only ``freecad_mcp.<pid>.sock`` entries in *directory* are considered; a
+    file is removed when its PID is gone or a zombie.  A user-pinned
+    ``FC_MCP_SOCKET`` is never pruned.  Returns the removed paths.
+    """
+    directory = directory or SOCKET_DIR
+    removed: List[str] = []
+    try:
+        names = list(os.listdir(directory))
+    except OSError:
+        return removed
+    for name in names:
+        if not (name.startswith("freecad_mcp.") and name.endswith(".sock")):
+            continue
+        path = os.path.join(directory, name)
+        if _PINNED_SOCKET and path == _PINNED_SOCKET:
+            continue
+        try:
+            pid = int(name[len("freecad_mcp."):-len(".sock")])
+        except ValueError:
+            pid = 0
+        if pid and _pid_alive(pid):
+            continue
+        try:
+            os.unlink(path)
+            removed.append(path)
+        except OSError:
+            pass
+    return removed
+
+
+def _cleanup_socket() -> None:
+    """Unlink our socket file, but only while it is still *our* inode.
+
+    A newer instance may already have rebound the path; comparing the inode
+    stops an exiting instance from deleting a successor's socket.
+    """
+    global _SOCK_INODE
+    path = _server_path or SOCKET_PATH
+    ident = _socket_identity(path)
+    if ident is not None and _SOCK_INODE is not None and ident != _SOCK_INODE:
+        return
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
+    _SOCK_INODE = None
+
+
+def _install_shutdown_hooks() -> None:
+    """Remove the socket file on a clean exit, SIGTERM/SIGHUP, or Qt shutdown.
+
+    A hard crash (SIGKILL / segfault) cannot run code; those files are reclaimed
+    later by :func:`prune_stale_sockets` via PID liveness.
+    """
+    global _shutdown_hooks_installed
+    if _shutdown_hooks_installed:
+        return
+    _shutdown_hooks_installed = True
+
+    import atexit
+    atexit.register(_cleanup_socket)
+
+    import signal
+
+    def _make(signum: int):
+        def _handler(_signum, _frame):
+            _cleanup_socket()
+            try:
+                signal.signal(signum, signal.SIG_DFL)
+                os.kill(os.getpid(), signum)
+            except OSError:
+                os._exit(128 + signum)
+        return _handler
+
+    for name in ("SIGTERM", "SIGHUP"):
+        signum = getattr(signal, name, None)
+        if signum is None:
+            continue
+        try:
+            signal.signal(signum, _make(signum))
+        except (ValueError, OSError):
+            pass
+
+    if _is_gui():
+        try:
+            from PySide import QtCore
+            app = QtCore.QApplication.instance()
+            if app is not None:
+                app.aboutToQuit.connect(_cleanup_socket)
+        except Exception:  # noqa: BLE001 - best effort
+            pass
 
 
 def guest_running() -> bool:
@@ -2497,10 +2644,17 @@ def start_guest(socket_path: Optional[str] = None) -> Dict[str, Any]:
     GUI: installs the Qt drain timer and returns immediately.  Headless: the
     caller must pump (``_drain_headless``) -- ``run_guest`` does that.
     """
-    global _server_sock, _server_thread, _server_timer, _server_path
+    global _server_sock, _server_thread, _server_timer, _server_path, _SOCK_INODE
     if _server_sock is not None:
         return {"ok": True, "running": True, "socket": _server_path}
     path = socket_path or SOCKET_PATH
+    directory = os.path.dirname(path)
+    if directory:
+        try:
+            os.makedirs(directory, exist_ok=True)
+        except OSError:
+            pass
+        prune_stale_sockets(directory)
     install_output_capture()
     _install_sigint_handler()
     try:
@@ -2512,6 +2666,8 @@ def start_guest(socket_path: Optional[str] = None) -> Dict[str, Any]:
     sock.listen(8)
     _server_sock = sock
     _server_path = path
+    _SOCK_INODE = _socket_identity(path)
+    _install_shutdown_hooks()
     # Listener thread does the socket I/O; the main thread executes each job so
     # scene/UI mutations always happen on FreeCAD's main thread (never a race).
     _server_thread = threading.Thread(target=_listener, args=(sock,), daemon=True)
@@ -2543,10 +2699,8 @@ def stop_guest() -> Dict[str, Any]:
             pass
         _server_timer = None
     if _server_path:
-        try:
-            os.unlink(_server_path)
-        except OSError:
-            pass
+        # Inode-safe: only unlink while the path still points at our socket.
+        _cleanup_socket()
     _server_path = None
     return {"ok": True, "running": False}
 
