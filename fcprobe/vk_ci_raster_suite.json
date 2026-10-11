@@ -82,6 +82,12 @@
       "timeout": 300
     },
     {
+      "name": "grid-lod",
+      "script": "vk_grid_lod_probe.py",
+      "env": { "COIN_VULKAN_BACKEND_DEBUG": "1", "FC_VULKAN_LOD_TRACE": "1" },
+      "timeout": 300
+    },
+    {
       "name": "physical-material",
       "script": "vk_physical_material_probe.py",
       "env": {
@@ -90,6 +96,12 @@
         "FC_VULKAN_DUMP_START": "0",
         "FC_VULKAN_DUMP_END": "400"
       },
+      "timeout": 300
+    },
+    {
+      "name": "navicube-hover",
+      "script": "vk_navicube_hover_probe.py",
+      "env": { "FC_VULKAN_BREADCRUMBS": "1" },
       "timeout": 300
     }
   ]
