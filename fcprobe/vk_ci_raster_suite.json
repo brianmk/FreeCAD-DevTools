@@ -163,6 +163,15 @@
       "script": "vk_tool_cursor_probe.py",
       "env": {},
       "timeout": 900
+    },
+    {
+      "name": "edge-highlight",
+      "script": "edge_highlight_probe.py",
+      "env": {
+        "FC_VULKAN_DUMP_FRAME": "1",
+        "COIN_VULKAN_DUMP_FRAME": "1"
+      },
+      "timeout": 300
     }
   ]
 }
