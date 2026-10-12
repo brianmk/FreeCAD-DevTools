@@ -24,6 +24,12 @@ Markers on stdout (fd 1):
 Run (the debug log is required for the counters):
   FC_VULKAN_DUMP_FRAME= COIN_VULKAN_BACKEND_DEBUG=1 \\
   build-freecad/bin/FreeCAD vk_annotation_restamp_probe.py
+
+The probe seeds ``UseVulkanRenderer`` and ``VulkanRenderMode`` itself, before the
+document (and therefore the view) is created.  With the default
+``UseVulkanRenderer=false`` the view is built on the classic Coin/OpenGL raster,
+the Vulkan backend never runs, and no ``[RTDBG]`` counters are emitted at all, so
+the probe would silently prove nothing.
 """
 
 import os
@@ -37,6 +43,8 @@ import Part
 import Sketcher
 from PySide import QtCore
 from freecad_probe import Session
+
+VIEW = "User parameter:BaseApp/Preferences/View"
 
 
 def emit(line):
@@ -90,6 +98,14 @@ def phase(name, preview):
 
 
 def run(session):
+    # Seed the Vulkan viewport *before* the document is created:
+    # UseVulkanRenderer decides which renderer the view is built with and
+    # VulkanRenderMode which page it shows.  Without this the probe runs on the
+    # classic Coin/OpenGL raster, the Vulkan backend never executes and no
+    # [RTDBG] counters are emitted - a silent no-op that looks like a pass.
+    session.set_pref(VIEW, "UseVulkanRenderer", True)
+    session.set_pref(VIEW, "VulkanRenderMode", 1)
+
     doc = FreeCAD.newDocument("AnnotationRestamp")
     body = doc.addObject("PartDesign::Body", "Body")
     sketch = body.newObject("Sketcher::SketchObject", "Sketch")
