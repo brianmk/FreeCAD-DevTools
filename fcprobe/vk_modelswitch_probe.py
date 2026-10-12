@@ -6,12 +6,21 @@ Reproduces the user's report "can't change from coin renderer to vulkan".
 The probe:
   * Opens a document with a box (PartWorkbench).
   * Handles the active-view carefully (view may exist only after a doc+window).
-  * Mirrors the status-bar mode combo: uses the ViewRenderingMode combo if
-    present, else calls view.setRenderMode() directly.
-  * Steps through RasterCoin(0) -> RasterVulkan(1) -> back -> forward,
-    logging the effective renderMode and the QStackedWidget currentWidget.
+  * Drives the switch through the status-bar render-mode combo
+    (`QComboBox "viewModeCombo"`, see MainWindow::addStatusBarItem).  A missing
+    combo is a FAIL: falling back to `view.setRenderMode()` would exercise the
+    Python API while never touching the control the user actually uses, which is
+    how a "the combo changes the label but nothing else happens" bug survived
+    this probe before.
+  * Phase 1 (fresh config): leaves `UseVulkanRenderer` off, so the view is
+    created without a Vulkan adapter, then selects RasterVulkan in the combo and
+    requires the Vulkan frame counter to advance -- the status-bar selector must
+    create the viewport, not merely record the mode.
+  * Phase 2: turns `UseVulkanRenderer` on and steps through
+    RasterCoin(0) -> RasterVulkan(1) -> back -> forward, logging the effective
+    renderMode and the QStackedWidget currentWidget.
   * Verdict PASS if after selecting RasterVulkan the effective renderMode is
-    RasterVulkan AND the visible surface is the Vulkan widget.
+    RasterVulkan AND forcing a frame advances the Vulkan frame counter.
 
 Run:
   FreeCAD vk_modelswitch_probe.py
@@ -30,6 +39,12 @@ from freecad_probe import Session  # noqa: E402
 
 VIEW = "User parameter:BaseApp/Preferences/View"
 
+# The status-bar render-mode selector.  MainWindow creates the QComboBox with
+# object name "ViewRenderingMode" and then hands it to addStatusBarItem(), which
+# overwrites the object name with the spec id ("viewModeCombo"): look it up by
+# what the widget actually ends up named.
+VIEW_MODE_COMBO = "viewModeCombo"
+
 
 def log(msg):
     print("MODESW " + msg, file=sys.stderr)
@@ -43,7 +58,7 @@ def combo():
     mw = FreeCADGui.getMainWindow()
     if mw is None:
         return None
-    return mw.findChild(QtWidgets.QComboBox, "ViewRenderingMode")
+    return mw.findChild(QtWidgets.QComboBox, VIEW_MODE_COMBO)
 
 
 def active_view():
@@ -74,9 +89,15 @@ def report(tag, expect_mode=None, expect_vulkan=None):
     if stack and stack.currentWidget():
         cur = stack.currentWidget().__class__.__name__
     c = combo()
-    cstr = f"combo={'present' if c is not None else 'ABSENT'}"
-    if c is not None:
-        cstr += f"(idx={c.currentIndex()})"
+    if c is None:
+        cstr = "combo=ABSENT"
+        s.error(
+            f"{tag}: status-bar render-mode combo (QComboBox "
+            f"'{VIEW_MODE_COMBO}') is absent - the render-mode selector is not "
+            f"in the status bar, so there is no user-facing way to switch"
+        )
+    else:
+        cstr = f"combo=present(idx={c.currentIndex()})"
     log(f"[{tag}] renderMode={mode} frame={frame} stackCur={cur} {cstr}")
 
     # The report was "can't change from the Coin renderer to Vulkan"; without these
@@ -109,8 +130,9 @@ def report(tag, expect_mode=None, expect_vulkan=None):
             time.sleep(0.02)
         log(f"[{tag}] forced frame: {before} -> {after} (stackCur={cur})")
         if expect_vulkan and after <= before:
-            s.error(f"{tag}: Vulkan page is current but forcing a frame did not "
-                    f"advance the Vulkan frame counter ({before} -> {after})")
+            s.error(f"{tag}: renderMode is {mode} but forcing a frame did not "
+                    f"advance the Vulkan frame counter ({before} -> {after}): no "
+                    f"rendering Vulkan viewport was created for the selected mode")
         elif not expect_vulkan and after != before:
             s.error(f"{tag}: Coin/GL page is current but the Vulkan frame counter "
                     f"advanced ({before} -> {after})")
@@ -138,20 +160,24 @@ def build():
 
 
 def set_mode(mode):
-    """Switch render mode via the status-bar combo if present, else direct."""
+    """Switch render mode through the status-bar combo.
+
+    The combo is the product path under test.  If it is missing, fail: silently
+    falling back to view.setRenderMode() would exercise the Python API and pass
+    while the control the user actually drives stays broken.
+    """
     c = combo()
-    if c is not None:
-        c.setCurrentIndex(mode)
-        FreeCADGui.updateGui()
-        QtCore.QCoreApplication.processEvents()
-        log(f"via combo index={mode}")
-    else:
-        view = active_view()
-        if view is not None:
-            view.setRenderMode(mode)
-            FreeCADGui.updateGui()
-            QtCore.QCoreApplication.processEvents()
-            log(f"via setRenderMode mode={mode}")
+    if c is None:
+        s.error(
+            f"set_mode({mode}): status-bar combo '{VIEW_MODE_COMBO}' is absent; "
+            f"refusing to fall back to view.setRenderMode()"
+        )
+        return False
+    c.setCurrentIndex(mode)
+    FreeCADGui.updateGui()
+    QtCore.QCoreApplication.processEvents()
+    log(f"via combo index={mode}")
+    return True
 
 
 def step():
@@ -160,6 +186,20 @@ def step():
     if k == 1:
         FreeCADGui.activateWorkbench("PartWorkbench")
         FreeCADGui.updateGui()
+        # Phase 1: fresh-config state.  UseVulkanRenderer off means the view is
+        # created in the classic Coin/OpenGL mode with no Vulkan adapter at all,
+        # which is exactly what a user with default settings has.
+        s.set_pref(VIEW, "UseVulkanRenderer", False)
+        s.set_pref(VIEW, "VulkanRenderMode", 0)
+        build()
+        report("fresh-coin", expect_mode=0, expect_vulkan=False)
+    elif k == 12:
+        # Selecting Vulkan in the combo must bring up the Vulkan viewport, not
+        # just record the mode: the frame counter has to advance.
+        set_mode(1)
+        report("fresh-coin->vulkan", expect_mode=1, expect_vulkan=True)
+    elif k == 24:
+        # Phase 2: a view whose new-view default is Vulkan.
         s.set_pref(VIEW, "UseVulkanRenderer", True)
         s.set_pref(VIEW, "VulkanRenderMode", 0)
         build()
@@ -169,16 +209,16 @@ def step():
             v.setRenderMode(0)
             FreeCADGui.updateGui()
         report("init-coin", expect_mode=0, expect_vulkan=False)
-    elif k == 12:
-        set_mode(1)
-        report("coin->vulkan", expect_mode=1, expect_vulkan=True)
-    elif k == 24:
-        set_mode(0)
-        report("vulkan->coin", expect_mode=0, expect_vulkan=False)
     elif k == 36:
         set_mode(1)
-        report("coin->vulkan-2", expect_mode=1, expect_vulkan=True)
+        report("coin->vulkan", expect_mode=1, expect_vulkan=True)
     elif k == 48:
+        set_mode(0)
+        report("vulkan->coin", expect_mode=0, expect_vulkan=False)
+    elif k == 60:
+        set_mode(1)
+        report("coin->vulkan-2", expect_mode=1, expect_vulkan=True)
+    elif k == 72:
         view = active_view()
         mode = int(view.getRenderMode()) if view is not None else -1
         log(f"final effective renderMode={mode}")
